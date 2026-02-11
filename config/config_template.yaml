@@ -1,0 +1,14 @@
+# Configuration file for computing spinal cord morphometrics
+# This file contains the necessary parameters for running the `sct_run_batch` command
+
+# Path to the whole-spine dataset
+path_data: 
+
+# Path to the output results
+path_output: 
+
+# Number of parallel jobs (-1 uses all CPU cores minus one)
+jobs: -1
+
+# List of subjects from the whole-spine dataset used to generate the PAM50
+include_list: 
