@@ -1,0 +1,14 @@
+# Ignore config files containing local paths
+config/config.yaml 
+
+# Ignore SCT output folders (log files, etc.)
+output/
+
+# Allow config template
+!config/config_template.yaml
+
+# Ignore results folder
+results/
+
+# Ignore system files
+.DS_Store
