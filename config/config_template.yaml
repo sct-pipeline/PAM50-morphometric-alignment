@@ -1,4 +1,4 @@
-# Configuration file for computing spinal cord morphometrics
+# Configuration file for computing spinal cord morphometrics on participants from the PAM50 template
 # This file contains the necessary parameters for running the `sct_run_batch` command
 
 # Path to the whole-spine dataset
@@ -10,5 +10,5 @@ path_output:
 # Number of parallel jobs (-1 uses all CPU cores minus one)
 jobs: -1
 
-# List of subjects from the whole-spine dataset used to generate the PAM50
+# List of participants from the whole-spine dataset used to generate the PAM50
 include_list: 
