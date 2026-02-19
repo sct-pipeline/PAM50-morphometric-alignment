@@ -157,43 +157,49 @@ def compute_interpolated_morphometrics(output_csv_path, PMJ_distances_csv, pmj, 
         level = row['Level']
         distance_pmj = row['DistancePMJ']
 
-        # Create a temporary file to store the result for each vert_level
-        temp_csv_filename = os.path.join(output_csv_path, f"{subject}_temp_pmj_{level}.csv")
+        # Process only if the PMJ distance is not none
+        if distance_pmj.notna().any():
 
-        if os.path.exists(temp_csv_filename):
-            print(f"Temporary file already exists: {temp_csv_filename}. Skipping processing for {level} (PMJ distance: {distance_pmj})")
-            continue
+            # Create a temporary file to store the result for each vert_level
+            temp_csv_filename = os.path.join(output_csv_path, f"{subject}_temp_pmj_{level}.csv")
 
-        # Call sct_process_segmentation
-        sct_process_segmentation.main([
-            '-i', t2w_seg_file,
-            '-pmj', pmj,
-            '-pmj-distance', str(distance_pmj),
-            '-pmj-extent', '3',
-            '-perlevel', '1',
-            '-o', temp_csv_filename,
-        ])
+            if os.path.exists(temp_csv_filename):
+                print(f"Temporary file already exists: {temp_csv_filename}. Skipping processing for {level} (PMJ distance: {distance_pmj})")
+                continue
 
-        # Read results from the temporary CSV file and append the values to a list (`all_results`)
-        temp_df = pd.read_csv(temp_csv_filename)
-        
-        # Rename columns
-        temp_df = temp_df.rename(columns={
-            'MEAN(area)': 'CSA',
-            'MEAN(diameter_AP)': 'AP_diameter',
-            'MEAN(diameter_RL)': 'RL_diameter',
-            'MEAN(eccentricity)': 'eccentricity',
-            'MEAN(solidity)': 'solidity'
-        })
+            # Call sct_process_segmentation
+            sct_process_segmentation.main([
+                '-i', t2w_seg_file,
+                '-pmj', pmj,
+                '-pmj-distance', str(distance_pmj),
+                '-pmj-extent', '3',
+                '-perlevel', '1',
+                '-o', temp_csv_filename,
+            ])
 
-        # Add subject, level type ('VertLevel' or 'SpinalLevel'), and DistancePMJ columns
-        temp_df['Level'] = level
-        temp_df['DistancePMJ'] = distance_pmj
-        temp_df['subject'] = subject
+            # Read results from the temporary CSV file and append the values to a list (`all_results`)
+            temp_df = pd.read_csv(temp_csv_filename)
 
-        # Append to the results list (this list will then contain all morphometrics for each PMJ distance, i.e. from each temp CSV file)
-        all_results.append(temp_df[['subject', 'VertLevel', 'DistancePMJ', 'CSA', 'AP_diameter', 'RL_diameter', 'eccentricity', 'solidity']])
-        print(f"Processed VertLevel {level} (PMJ distance : {distance_pmj})")
+            # Add the level to the 'VertLevel' column in the temporary CSV file
+            temp_df['VertLevel'] == level
+            
+            # Rename columns
+            temp_df = temp_df.rename(columns={
+                'MEAN(area)': 'CSA',
+                'MEAN(diameter_AP)': 'AP_diameter',
+                'MEAN(diameter_RL)': 'RL_diameter',
+                'MEAN(eccentricity)': 'eccentricity',
+                'MEAN(solidity)': 'solidity'
+            })
+
+            # Add subject, level type ('VertLevel' or 'SpinalLevel'), and DistancePMJ columns
+            temp_df['VertLevel'] = level
+            temp_df['DistancePMJ'] = distance_pmj
+            temp_df['subject'] = subject
+
+            # Append to the results list (this list will then contain all morphometrics for each PMJ distance, i.e. from each temp CSV file)
+            all_results.append(temp_df[['subject', 'VertLevel', 'DistancePMJ', 'CSA', 'AP_diameter', 'RL_diameter', 'eccentricity', 'solidity']])
+            print(f"Processed VertLevel {level} (PMJ distance : {distance_pmj})")
 
     # Save all results to a final CSV file
     final_results_df = pd.concat(all_results, ignore_index=True)
