@@ -2,6 +2,7 @@ import sys, os
 import argparse
 import glob
 import numpy as np
+import nibabel as nib
 from scipy.interpolate import interp1d
 import pandas as pd
 import spinalcordtoolbox.utils as sct
@@ -21,65 +22,208 @@ Outputs :
 Usage : 
     The script can be run with `sct_run_batch` using the wrapper script `wrapper_rootlets.sh` as follows:
         
-        sct_run_batch -config config/config.yaml -script wrapper/wrapper_extract_morphometrics.sh
+        sct_run_batch -config config/config.yaml -script wrappers/wrapper_extract_morphometrics.sh
 
 Author: Samuelle St-Onge
+
 """
 
-def compute_morphometrics(output_csv_filename, participants_info, t2w_seg_file, label_file, perlevel=1, perslice=1):
+def run_sct_process_segmentation_per_slice(pmj, t2w_seg_file, per_slice_csv):
+
     """
-    This function computes spinal cord morphometrics using `sct_process_segmentation`. 
-    The output morphometrics are saved in a CSV file with the age and sex info for each subject, taken from the 1participants.tsv` file. 
-    
-    Args : 
-        output_csv_filename: Name of the output CSV file
-        participants_info: Path to the `participants.tsv` file
-        t2w_seg_file: Path to the spinal cord segmentation mask
-        disc_file: The labeled discs
-        perlevel: Output either one metric per level (perlevel=1) or a single output metric for all levels (perlevel=0)
-        perslice: Output either one metric per slice (perslice=1) or a single output metric for all slices (perslice=0)
-        pmj: Path to the PMJ label
+    This function computes sct_process_segmentation to get the PMJ distances of each slice
     """
-    # Run sct_process_segmentation
+
     sct_process_segmentation.main([
         '-i', t2w_seg_file,
-        '-discfile', label_file,
-        '-perlevel', perlevel,
-        '-perslice', perslice,
-        '-o', output_csv_filename
+        '-pmj', pmj,
+        '-perslice', '1',
+        '-o', per_slice_csv,
+        '-append', '1'
     ])
 
-    # Load results in output CSV file 
-    df = pd.read_csv(output_csv_filename)
+def get_disc_label_slices(subject, per_slice_csv, output_csv_dir, label_file):
+    """
+    Get the slices corresponding to each disc label
 
-    # Get the subject ID from the filename
-    df['subject'] = 'sub-' + df['Filename'].astype(str).str.extract(r'sub-([0-9]+)')[0]
+    This function was inspired by : https://github.com/sct-pipeline/pmj-based-csa/blob/main/get_disc_slice.py 
+    """
 
-    # Get the age and sex from the `participants.tsv`` file, and add to the morphometrics CSV file 
-    df_age = pd.read_csv(participants_info, sep='\t').rename(columns={'participant_id': 'subject'})
-    df.columns = df.columns.str.strip()
-    df_age.columns = df_age.columns.str.strip()
+    # Read label file
+    labels = nib.load(label_file)
+    
+    # Get labels
+    z_coords = np.where(labels.get_fdata() != 0)[-1] # Get the z coordinates of the 
+    label_values = labels.get_fdata()[np.where(labels.get_fdata() != 0)]
+    z = []
+    i = 0
+    log = pd.DataFrame(columns=['Subject', 'Level', 'Slices', 'DistancePMJ'])
+    for z in z_coords:
+        log = log.append({'Subject': subject, 'Level': 
+        label_values[i], 'Slices': z}, ignore_index=True)
+        i = i + 1
+    log = log.sort_values(by="Level").reset_index(drop=True)
+    log.to_csv(os.path.join(output_csv_dir, f"{subject}_disc_slices.csv"), index=False)
 
-    df = df.drop(columns=[col for col in ['age', 'sex'] if col in df.columns])
-    df_merged = df.merge(df_age[['subject', 'age', 'sex']], on='subject', how='left')
+    # Merge the PMJ distances from the per_per_slice_csv 
+    per_slice_df = pd.read_csv(per_slice_csv) 
+    slice_col = "Slice (I->S)"
+    pmj_col = "DistancePMJ"   
 
-    # Rename columns and save the changes to the CSV file
-    df_merged = df_merged.rename(columns={
-        'MEAN(area)': 'CSA',
-        'MEAN(diameter_AP)': 'AP_diameter',
-        'MEAN(diameter_RL)': 'RL_diameter',
-        'MEAN(eccentricity)': 'eccentricity',
-        'MEAN(solidity)': 'solidity'
-    })
+    log = log.merge(
+        per_slice_df[[slice_col, pmj_col]],
+        left_on="Slices",
+        right_on=slice_col,
+        how="left"
+    )
 
-    df_merged.to_csv(output_csv_filename, index=False)
+    # Save
+    output_file = os.path.join(output_csv_dir, f"{subject}_disc_slices.csv")
+    log.to_csv(output_file, index=False)
 
+
+    return log
+
+
+def compute_interpolated_morphometrics(data_path, output_csv_path, output_csv_filename, level_type, pmj, t2w_seg_file, participants_info, final_csv_filename, subject):
+    """
+    This function interpolates PMJ distances at 0.1 intervals between each each Vertebral Level or Spinal Level.
+    Then, morphometrics are computed for each distance (1.0, 1.1, 1.2, etc.), and the results are saved to a final CSV file.
+
+    Args:
+        data_path: Path to the dataset
+        output_csv_path: Path to the folder containing the CSV files
+        output_csv_filename: Name of the output CSV file containing morphometrics data (generated by the `compute_morphometrics` function above).
+        level_type: Either 'VertLevel' or 'SpinalLevel' to determine the type of levels to interpolate.
+        t2w_pmj_label: Path to the PMJ label file
+        t2w_seg_file: Path to the T2w segmentation file
+        participants_info: Path to the participants.tsv file
+        final_csv_filename: The name of the output CSV file (containing the interpolated morphometrics)
+        participants_info: Path to the TSV file containing participant information
+
+    """
+
+    csv_file = pd.read_csv(output_csv_filename)
+
+    if level_type in csv_file.columns and 'DistancePMJ' in csv_file.columns:
+        # Clean and sort
+        df_sorted = csv_file[[level_type, 'DistancePMJ']].dropna().drop_duplicates().sort_values(by=level_type)
+        levels = df_sorted[level_type].values
+        pmj_distances = df_sorted['DistancePMJ'].values
+
+        # Create interpolation function
+        interp_func = interp1d(levels, pmj_distances, kind='linear', fill_value='extrapolate')
+
+        # Generate 0.1 step levels between each integer level (excluding integer levels)
+        interp_levels = []
+        for i in range(int(levels.min()), int(levels.max())):
+            interp_levels.extend(np.round(np.arange(i + 0.1, i + 1.0, 0.1), 1))
+
+        interp_levels = np.array(interp_levels)
+        interp_distances = interp_func(interp_levels)
+
+        # Create interpolated DataFrame
+        df_interp = pd.DataFrame({
+            level_type: interp_levels,
+            'DistancePMJ': interp_distances
+        })
+
+        # Add other morphometrics as NaN for interpolated levels
+        morphometric_cols = [col for col in csv_file.columns if col not in [level_type, 'DistancePMJ']]
+        for col in morphometric_cols:
+            df_interp[col] = np.nan
+
+        # Combine original + interpolated
+        df_combined = pd.concat([csv_file, df_interp], ignore_index=True).sort_values(by=level_type).reset_index(drop=True)
+
+        # Re-add subject column
+        if 'subject' not in df_combined.columns:
+            df_combined['subject'] = subject
+
+        # Save final merged morphometrics with interpolated PMJ distances
+        output_interp_csv = output_csv_filename.replace('.csv', f'_interpolated.csv')
+        df_combined.to_csv(output_interp_csv, index=False)
+        print(f"Updated morphometrics CSV with interpolated PMJ distances saved to:\n{output_interp_csv}")
+    else:
+        print(f"Missing {level_type} or DistancePMJ column — interpolation skipped.")
+
+    # Create a list to store DataFrames for each distance from PMJ 
+    all_results = []
+
+    # Read the interpolated CSV file
+    csv_file_interpolated = pd.read_csv(output_interp_csv)
+
+    # Merge age and sex into the interpolated CSV before processing
+    df_participants_info = pd.read_csv(participants_info, sep='\t').rename(columns={'participant_id': 'subject'})
+    csv_file_interpolated = csv_file_interpolated.merge(df_participants_info[['subject', 'age', 'sex']], on='subject', how='left')
+
+    # Iterate through each row in the interpolated CSV file and compute morphometrics for each PMJ distance (each VertLevel interval)
+    for index, row in csv_file_interpolated.iterrows():
+        level = row[level_type]
+        distance_pmj = row['DistancePMJ']
+
+        # Create a temporary file to store the result for each vert_level
+        temp_csv_filename = os.path.join(output_csv_path, f"{subject}_temp_pmj_{level_type}_{level}.csv")
+
+        if os.path.exists(temp_csv_filename):
+            print(f"Temporary file already exists: {temp_csv_filename}. Skipping processing for {level_type} {level} (PMJ distance: {distance_pmj})")
+            continue
+
+        # Call sct_process_segmentation
+        sct_process_segmentation.main([
+            '-i', t2w_seg_file,
+            '-pmj', pmj,
+            '-pmj-distance', str(distance_pmj),
+            '-pmj-extent', '3',
+            '-perlevel', '1',
+            '-o', temp_csv_filename,
+        ])
+
+        # Read results from the temporary CSV file and append the values to a list (`all_results`)
+        temp_df = pd.read_csv(temp_csv_filename)
+        
+        # Rename columns
+        temp_df = temp_df.rename(columns={
+            'MEAN(area)': 'CSA',
+            'MEAN(diameter_AP)': 'AP_diameter',
+            'MEAN(diameter_RL)': 'RL_diameter',
+            'MEAN(eccentricity)': 'eccentricity',
+            'MEAN(solidity)': 'solidity'
+        })
+
+        # Add subject, level type ('VertLevel' or 'SpinalLevel'), and DistancePMJ columns
+        temp_df[level_type] = level
+        temp_df['DistancePMJ'] = distance_pmj
+        temp_df['subject'] = subject
+
+        # Append to the results list (this list will then contain all morphometrics for each PMJ distance, i.e. from each temp CSV file)
+        all_results.append(temp_df[['subject', 'VertLevel', 'DistancePMJ', 'CSA', 'AP_diameter', 'RL_diameter', 'eccentricity', 'solidity']])
+        print(f"Processed VertLevel {level} (PMJ distance : {distance_pmj})")
+
+    # Save all results to a final CSV file
+    final_results_df = pd.concat(all_results, ignore_index=True)
+    
+    # Add age and sex columns to the final CSV file
+    final_results_df = final_results_df.merge(df_participants_info[['subject', 'age', 'sex']], on='subject', how='left')
+    
+    # Save the final results to a CSV file
+    final_results_df.to_csv(final_csv_filename, index=False)
+    print(f"Final morphometrics results saved to:\n{final_csv_filename}")
+
+    # Delete all temporary files
+    temp_files_pattern = os.path.join(output_csv_path, f"{subject}_temp_pmj_*.csv")
+    temp_files = glob.glob(temp_files_pattern)
+
+    for temp_file in temp_files:
+        os.remove(temp_file)
+        print(f"Deleted temp file: {temp_file}")
 
 def main(subject, data_path, path_output, subject_dir, file_t2):
 
     # Define paths
     t2w_seg_file = os.path.join(subject_dir, f"{file_t2}_label-SC_seg.nii.gz")
     t2w_disc_labels = os.path.join(subject_dir, f"{file_t2}_labels-disc-manual.nii.gz")
+    t2w_pmj_label = os.path.join(subject_dir, f"{file_t2}_label-PMJ_dlabel.nii.gz")
     participants_info = os.path.join(data_path, 'participants.tsv')
 
     # Define output CSV file
@@ -87,22 +231,43 @@ def main(subject, data_path, path_output, subject_dir, file_t2):
     os.makedirs(output_csv_dir, exist_ok=True) # Create a folder named "morphometrics" inside the output results folder
     output_csv_filename = os.path.join(output_csv_dir, f"{subject}_morphometrics.csv")
 
+    # Check if the final CSV file already exists
+    final_csv_filename = output_csv_filename.replace('.csv', '_final.csv')
 
-    if os.path.exists(output_csv_filename):
-        print(f"Final CSV already exists for subject {subject}: {output_csv_filename}. Skipping processing.")
+    if os.path.exists(final_csv_filename):
+        print(f"Final CSV already exists for subject {subject}: {final_csv_filename}. Skipping processing.")
         return
     else:
         print(f"Processing subject: {subject}")
 
-    # Compute morphometrics per slice and per level
-    compute_morphometrics(
-        output_csv_filename=os.path.join(output_csv_dir, f"{subject}_morphometrics.csv"),
-        participants_info=participants_info,
+
+    # Step 1 : Run sct_process_segmentation per slice to get the PMJ distances of each slice
+    run_sct_process_segmentation_per_slice(
+        pmj=t2w_pmj_label,
         t2w_seg_file=t2w_seg_file,
-        label_file=t2w_disc_labels, # Use the labeled segmentation 
-        perlevel='1',
-        perslice='1',
+        per_slice_csv=os.path.join(output_csv_dir, f"{subject}_per_slice.csv")
     )
+
+
+    # Step 2 : Get the disc label slices and add the PMJ distances of each disc label
+    log = get_disc_label_slices(
+        subject, 
+        os.path.join(output_csv_dir, f"{subject}_per_slice.csv"),
+        output_csv_dir, 
+        t2w_disc_labels)
+    
+    # Step 3 : Interpolate the PMJ distances and run sct_process_segmentation for all interpolated PMJ distances
+    # compute_interpolated_morphometrics(data_path, 
+    #                                    output_csv_path, 
+    #                                    output_csv_filename, 
+    #                                    level_type, 
+    #                                    pmj, 
+    #                                    t2w_seg_file, 
+    #                                    participants_info, 
+    #                                    final_csv_filename, 
+    #                                    subject)
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run morphometric extraction for one subject")
