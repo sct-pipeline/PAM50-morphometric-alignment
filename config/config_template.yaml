@@ -2,7 +2,7 @@
 # This file contains the necessary parameters for running the `sct_run_batch` command
 
 # Path to the whole-spine dataset
-path_data: 
+path_data:
 
 # Path to the output results
 path_output: 
