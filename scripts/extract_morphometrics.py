@@ -112,7 +112,7 @@ def get_disc_label_PMJ_dist(subject, per_slice_csv, output_csv_dir, label_file, 
     log.to_csv(output_PMJ_dist_csv, index=False)
 
 
-def compute_interpolated_morphometrics(subject, output_csv_path, PMJ_distances_csv, pmj, t2w_seg_file, participants_info, interp_PMJ_dist_csv, final_csv_filename, subject):
+def compute_interpolated_morphometrics(subject, output_csv_path, PMJ_distances_csv, pmj, t2w_seg_file, participants_info, interp_PMJ_dist_csv, final_csv_filename):
     """
     This function interpolates PMJ distances at 0.1 intervals between each each vertebral level using PMJ distances interpolated between each disc label
     Then, morphometrics are computed for each distance (1.0, 1.1, 1.2, etc.), and the results are saved to a final CSV file.
@@ -253,6 +253,30 @@ def compute_interpolated_morphometrics(subject, output_csv_path, PMJ_distances_c
         os.remove(temp_file)
         print(f"Deleted temp file: {temp_file}")
 
+
+def PMJ_SC_tip_normalization(per_slice_csv):
+
+    perslice_df = pd.read_csv(per_slice_csv)
+
+    # Keep slices where CSA > 0 
+    SC_slices = perslice_df[perslice_df["MEAN(area)"] > 0]
+
+    # Get the first slice with CSA values (which corresponds to the tip of the SC)
+    slice_SC_tip = SC_slices["Slice (I->S)"].min()
+
+    print(f'Slice corresponding to SC tip : {slice_SC_tip}')
+
+    # Get the PMJ distance of the SC tip
+    dist_PMJ_SC_tip = perslice_df.loc[perslice_df["Slice (I->S)"] == slice_SC_tip, "DistancePMJ"].values[0]
+
+    # Normalize distances between PMJ and the SC tip
+    perslice_df["NormalizedDistance"] = perslice_df["DistancePMJ"] / dist_PMJ_SC_tip
+
+    # Add the "NormalizedDistance" column to the per_slice_csv
+    perslice_df.to_csv(per_slice_csv, index=False)
+    print(f"Final morphometrics results saved to:\n{per_slice_csv}")
+
+
 def main(subject, data_path, path_output, subject_dir, file_t2):
 
     # Define paths
@@ -271,37 +295,42 @@ def main(subject, data_path, path_output, subject_dir, file_t2):
 
     # Check if final interpolated morphometrics CSV file already exists 
     if os.path.exists(final_csv):
-        print(f"Final CSV already exists for subject {subject}: {final_csv}. Skipping processing.")
-        return
+        print(f"Interpolated morphometrics already exists for subject {subject}: {final_csv}. Skipping.")
     else:
-        print(f"Processing subject: {subject}")
+        print(f"Computing interpolated morphometrics subject: {subject}")
+
+        # Step 1 : Run sct_process_segmentation per slice to get the PMJ distances of each slice
+        run_sct_process_segmentation_per_slice(
+            pmj=t2w_pmj_label,
+            t2w_seg_file=t2w_seg_file,
+            output_per_slice_csv=output_per_slice_csv
+            )
 
 
-    # Step 1 : Run sct_process_segmentation per slice to get the PMJ distances of each slice
-    run_sct_process_segmentation_per_slice(
-        pmj=t2w_pmj_label,
-        t2w_seg_file=t2w_seg_file,
-        output_per_slice_csv=output_per_slice_csv
-        )
-
-
-    # Step 2 : Get the disc label slices and add the PMJ distances of each disc label
-    get_disc_label_PMJ_dist(
-        subject, 
-        os.path.join(output_csv_dir, f"{subject}_per_slice.csv"),
-        output_csv_dir, 
-        t2w_disc_labels,
-        output_PMJ_dist_csv=output_PMJ_dist_csv)
+        # Step 2 : Get the disc label slices and add the PMJ distances of each disc label
+        get_disc_label_PMJ_dist(
+            subject, 
+            output_per_slice_csv,
+            output_csv_dir, 
+            t2w_disc_labels,
+            output_PMJ_dist_csv=output_PMJ_dist_csv)
+        
+        # Step 3 : Interpolate the PMJ distances and run sct_process_segmentation for all interpolated PMJ distances
+        compute_interpolated_morphometrics(
+            subject,
+            output_csv_dir, 
+            PMJ_distances_csv=output_PMJ_dist_csv, 
+            pmj=t2w_pmj_label, 
+            t2w_seg_file=t2w_seg_file, 
+            participants_info=participants_info, 
+            interp_PMJ_dist_csv=interp_PMJ_dist_csv,
+            final_csv_filename=final_csv
+            )
+        
+    print(f"Normalizing SC with PMJ and SC tip for: {subject}")
     
-    # Step 3 : Interpolate the PMJ distances and run sct_process_segmentation for all interpolated PMJ distances
-    compute_interpolated_morphometrics(output_csv_dir, 
-                                       PMJ_distances_csv=output_PMJ_dist_csv, 
-                                       pmj=t2w_pmj_label, 
-                                       t2w_seg_file=t2w_seg_file, 
-                                       participants_info=participants_info, 
-                                       interp_PMJ_dist_csv=interp_PMJ_dist_csv,
-                                       final_csv_filename=final_csv, 
-                                       subject=subject)
+    # Step 4 : Normalize the distances between PMJ and SC tip
+    PMJ_SC_tip_normalization(output_per_slice_csv)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run morphometric extraction for one subject")
