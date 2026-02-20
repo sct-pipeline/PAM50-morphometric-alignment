@@ -11,13 +11,20 @@ from spinalcordtoolbox.scripts import sct_process_segmentation
 """
 This script computes spinal cord morphometrics (e.g., CSA) from T2-weighted data.
 
-The script first computes morphometrics per slice and per level. 
-Then, it interpolates PMJ distances for each Vertebral Level, and computes morphometrics at each interpolated PMJ distance (at 0.1 mm intervals between each Vertebral Level).
+The script :
+1. Computes morphometrics using `sct_process_segmentation` per slice.
+2. Gets the z-slices corresponding to each disc label.
+3. Using the PMJ distances from the `sct_process_segmentation` output, it adds the PMJ distances for each disc label. 
+4. Interpolates PMJ distances for each Vertebral Level, and computes morphometrics at each interpolated PMJ distance 
+   (at 0.1 mm intervals between each Vertebral Level) using `sct_process_segmentation`
 
 Outputs :
-- Temporary CSV files are created for each interpolated PMJ distance (stored inside `output/results` from your `path-output` folder defined in the config file)
-- A combined CSV containing CSA values for each interpolated distance will be saved per subject under `results/morphometrics`
-- The final CSV files will contain age and sex information for each subject, taken from the `participants.tsv` file.
+- {subject}_per_slice.csv : CSV files containing morphometrics per slice
+- {subject}_PMJ_dist.csv : CSV files with Slice indexes and PMJ distances for each disc label
+- {subject}_PMJ_dist_interp.csv : CSV files with the interpolated PMJ distances
+- {subject}_temp_pmj_{level}.csv: Temporary CSV files for each interpolated PMJ distance
+- {subject}_interpolated_morphometrics.csv : A combined CSV containing CSA values for each interpolated distance. This final CSV also
+   contains age and sex information, taken from the `participants.tsv` file.
 
 Usage : 
     The script can be run with `sct_run_batch` using the wrapper script `wrapper_rootlets.sh` as follows:
@@ -32,6 +39,15 @@ def run_sct_process_segmentation_per_slice(pmj, t2w_seg_file, output_per_slice_c
 
     """
     This function computes sct_process_segmentation to get the PMJ distances of each slice
+
+    Args:
+        pmj: Path to the PMJ label file
+        t2w_seg_file: Path to the T2w SC segmentation file
+        output_per_slice_csv: the output CSV file containing morphometrics per slice
+
+    Output:
+        {subject}_per_slice.csv : CSV files containing morphometrics per slice
+
     """
 
     sct_process_segmentation.main([
@@ -42,9 +58,24 @@ def run_sct_process_segmentation_per_slice(pmj, t2w_seg_file, output_per_slice_c
         '-append', '1'
     ])
 
-def get_disc_label_slices(subject, per_slice_csv, output_csv_dir, label_file, output_PMJ_dist_csv):
+def get_disc_label_PMJ_dist(subject, per_slice_csv, output_csv_dir, label_file, output_PMJ_dist_csv):
     """
-    Get the slices corresponding to each disc label
+    Get the PMJ distances of each disc label
+
+    This function:
+    1. Generates a CSV file containing the slice indexes corresponding to each disc label ({subject}_PMJ_dist.csv)
+    2. Using a previously generated CSV file from sct_process_segmentation per slice, gets the PMJ distances of the slice indexes of each disc label
+       and adds it to the {subject}_PMJ_dist.csv.
+    
+    Args:
+        subject: participant ID 
+        per_slice_csv: CSV file containing morphometrics per slice 
+        output_csv_dir: path to output csv files
+        label_file: file containing disc labels
+        output_PMJ_dist_csv : the output CSV file containing the list of disc labels with their corresponding slice indexes and PMJ distances
+
+    Output:
+        {subject}_PMJ_dist.csv : CSV file containing list of disc labels with their corresponding slice indexes and PMJ distances
 
     This function was inspired by : https://github.com/sct-pipeline/pmj-based-csa/blob/main/get_disc_slice.py 
     """
@@ -52,7 +83,7 @@ def get_disc_label_slices(subject, per_slice_csv, output_csv_dir, label_file, ou
     # Read label file
     labels = nib.load(label_file)
     
-    # Get labels
+    # Get labels and their respective z-slice indexes
     z_coords = np.where(labels.get_fdata() != 0)[-1] # Get the z coordinates of the 
     label_values = labels.get_fdata()[np.where(labels.get_fdata() != 0)]
     z = []
@@ -61,7 +92,7 @@ def get_disc_label_slices(subject, per_slice_csv, output_csv_dir, label_file, ou
     for z in z_coords:
         log = log.append({'Subject': subject, 'Level': 
         label_values[i], 'Slices': z}, ignore_index=True)
-        i = i + 1
+        i = i + 1 
     log = log.sort_values(by="Level").reset_index(drop=True)
     log.to_csv(os.path.join(output_csv_dir, f"{subject}_PMJ_dist.csv"), index=False)
 
@@ -81,23 +112,26 @@ def get_disc_label_slices(subject, per_slice_csv, output_csv_dir, label_file, ou
     log.to_csv(output_PMJ_dist_csv, index=False)
 
 
-    return log
-
-
-def compute_interpolated_morphometrics(output_csv_path, PMJ_distances_csv, pmj, t2w_seg_file, participants_info, interp_PMJ_dist_csv, final_csv_filename, subject):
+def compute_interpolated_morphometrics(subject, output_csv_path, PMJ_distances_csv, pmj, t2w_seg_file, participants_info, interp_PMJ_dist_csv, final_csv_filename, subject):
     """
-    This function interpolates PMJ distances at 0.1 intervals between each each Vertebral Level or Spinal Level.
+    This function interpolates PMJ distances at 0.1 intervals between each each vertebral level using PMJ distances interpolated between each disc label
     Then, morphometrics are computed for each distance (1.0, 1.1, 1.2, etc.), and the results are saved to a final CSV file.
 
     Args:
-        data_path: Path to the dataset
+        subject: participant ID 
         output_csv_path: Path to the folder containing the CSV files
-        output_csv_filename: Name of the output CSV file containing morphometrics data (generated by the `compute_morphometrics` function above).
-        t2w_pmj_label: Path to the PMJ label file
-        t2w_seg_file: Path to the T2w segmentation file
+        PMJ_distances_csv: CSV file containing PMJ distances for each disc label (generated by the `get_disc_label_PMJ_dist` function above).
+        pmj: Path to the PMJ label file
+        t2w_seg_file: Path to the T2w SC segmentation file
         participants_info: Path to the participants.tsv file
-        final_csv_filename: The name of the output CSV file (containing the interpolated morphometrics)
-        participants_info: Path to the TSV file containing participant information
+        interp_PMJ_dist_csv: The output CSV file which will contain the interpolated PMJ distances
+        final_csv_filename: The output CSV file containing computed morphometrics for each interpolated PMJ distance
+
+    Outputs:
+        subject}_PMJ_dist_interp.csv : CSV files with the interpolated PMJ distances
+        {subject}_temp_pmj_{level}.csv: Temporary CSV files for each interpolated PMJ distance
+        {subject}_interpolated_morphometrics.csv : A combined CSV containing CSA values for each interpolated distance. This final CSV also
+        contains age and sex information, taken from the `participants.tsv` file.
 
     """
 
@@ -158,7 +192,7 @@ def compute_interpolated_morphometrics(output_csv_path, PMJ_distances_csv, pmj, 
         distance_pmj = row['DistancePMJ']
 
         # Process only if the PMJ distance is not none
-        if distance_pmj.notna().any():
+        if pd.notna(distance_pmj):
 
             # Create a temporary file to store the result for each vert_level
             temp_csv_filename = os.path.join(output_csv_path, f"{subject}_temp_pmj_{level}.csv")
@@ -252,7 +286,7 @@ def main(subject, data_path, path_output, subject_dir, file_t2):
 
 
     # Step 2 : Get the disc label slices and add the PMJ distances of each disc label
-    log = get_disc_label_slices(
+    get_disc_label_PMJ_dist(
         subject, 
         os.path.join(output_csv_dir, f"{subject}_per_slice.csv"),
         output_csv_dir, 
