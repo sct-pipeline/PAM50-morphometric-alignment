@@ -277,124 +277,6 @@ def PMJ_SCtip_normalization(per_slice_csv):
         perslice_df.to_csv(per_slice_csv, index=False)
         print(f"Normalized morphometrics results saved to:\n{per_slice_csv}")
 
-def C1_SCtip_normalization(per_slice_csv, PMJ_distances_csv):
-
-    perslice_df = pd.read_csv(per_slice_csv)
-    pmj_dist_df = pd.read_csv(PMJ_distances_csv)
-
-    # Keep slices where CSA > 0 
-    SC_slices = perslice_df[perslice_df["MEAN(area)"] > 0]
-
-    # Get the first slice with CSA values (which corresponds to the tip of the SC)
-    slice_SC_tip = SC_slices["Slice (I->S)"].min()
-
-    # Get the PMJ distance of the SC tip
-    dist_PMJ_SC_tip = perslice_df.loc[perslice_df["Slice (I->S)"] == slice_SC_tip, "DistancePMJ"].values[0]
-
-    print(f'Slice corresponding to SC tip : {slice_SC_tip}')
-
-    # Get the PMJ distance corresponding to the C1 vertebrae
-    dist_PMJ_C1 = pmj_dist_df.loc[pmj_dist_df["Level"] == 1.0, "DistancePMJ"].values[0]
-
-    print(f'Distance from PMJ to C1: {dist_PMJ_C1}')
-
-    # Normalize distances between C1 vertebrae and the SC tip
-    perslice_df["Normalized_C1_SCtip"] = ((perslice_df["DistancePMJ"] - dist_PMJ_C1) / (dist_PMJ_SC_tip - dist_PMJ_C1))
-
-    # Add the "NormalizedDistance" column to the per_slice_csv if it does not already exist
-    perslice_df.to_csv(per_slice_csv, index=False)
-    print(f"Final normalized morphometrics saved to:\n{per_slice_csv}")
-
-
-def C1_CE_LE_SCtip_normalization(per_slice_csv, PMJ_distances_csv):
-
-    """
-    Normalize across the following SC landmarks : 
-    0.0 ---> C1
-    0.2 ---> cervical enlargment (maxiumum CSA in the first half of the CSA values)
-    0.9 ---> lumbar enlargment (maxiumum CSA in the second half of the CSA values)
-    1.0 ---> SC tip 
-    """
-
-    perslice_df = pd.read_csv(per_slice_csv)
-    pmj_dist_df = pd.read_csv(PMJ_distances_csv)
-
-    # Only keep slices where CSA > 0
-    SC_slices = perslice_df[perslice_df["MEAN(area)"] > 0].copy()
-    SC_slices = SC_slices.sort_values("Slice (I->S)")
-
-    # ---- 0.0 :  C1 LEVEL ----
-    dist_PMJ_C1 = pmj_dist_df.loc[pmj_dist_df["Level"] == 1.0, "DistancePMJ"].values[0]
-    print(f"Distance from PMJ to C1: {dist_PMJ_C1}")
-
-    # ---- 1.0 : SC TIP ----
-    slice_SC_tip = SC_slices["Slice (I->S)"].min()
-    dist_PMJ_SC_tip = perslice_df.loc[perslice_df["Slice (I->S)"] == slice_SC_tip, "DistancePMJ"].values[0]
-    print(f"Slice corresponding to SC tip: {slice_SC_tip}")
-
-    # ---- 0.2 CERVICAL ENLARGMENT ----
-    
-    # Get slice numbers for C2 and C7
-    slice_C2 = pmj_dist_df.loc[pmj_dist_df["Level"] == 2.0, "Slice (I->S)"].values[0]
-    slice_C7 = pmj_dist_df.loc[pmj_dist_df["Level"] == 7.0, "Slice (I->S)"].values[0]
-
-    # Select slices between C2 and C7
-    slice_range_cervical_enlargement = perslice_df[(perslice_df["Slice (I->S)"] >= slice_C7) & (perslice_df["Slice (I->S)"] <= slice_C2)]
-
-    # Find maximum CSA within this range
-    idx_max = slice_range_cervical_enlargement["MEAN(area)"].idxmax()
-    cervical_row = slice_range_cervical_enlargement.loc[idx_max]
-    dist_PMJ_cervical_enlargment = cervical_row["DistancePMJ"]
-
-    print(f"Cervical enlargement distance from PMJ: {dist_PMJ_cervical_enlargment}")
-
-    # ---- 0.9 LUMBAR ENLARGMENT ----
-
-    # Get slice numbers for T5 (level = 12.0) and L1 (level = 20.0)
-    slice_T5 = pmj_dist_df.loc[pmj_dist_df["Level"] == 12.0, "Slice (I->S)"].values[0]
-
-    # Select slices between T5 and L1
-    slice_range_lumbar_enlargement = perslice_df[(perslice_df["Slice (I->S)"] >= slice_SC_tip) & (perslice_df["Slice (I->S)"] <= slice_T5)]
-
-    # Find maximum CSA within this range
-    idx_max = slice_range_lumbar_enlargement["MEAN(area)"].idxmax()
-    lumbar_row = slice_range_lumbar_enlargement.loc[idx_max]
-    dist_PMJ_lumbar_enlargment = lumbar_row["DistancePMJ"]
-
-    print(f"Lumbar enlargement distance from PMJ: {dist_PMJ_lumbar_enlargment}")
-
-    # ---- 1.0 : SC TIP ----
-    slice_SC_tip = SC_slices["Slice (I->S)"].min()
-    dist_PMJ_SC_tip = perslice_df.loc[perslice_df["Slice (I->S)"] == slice_SC_tip, "DistancePMJ"].values[0]
-    print(f"Slice corresponding to SC tip: {slice_SC_tip}")
-
-    # ---- LANDMARK POSITIONS ----
-    landmarks_dist = np.array([
-        dist_PMJ_C1,
-        dist_PMJ_cervical_enlargment,
-        dist_PMJ_lumbar_enlargment,
-        dist_PMJ_SC_tip
-    ])
-
-    landmarks_norm = np.array([
-        0.0,
-        0.2,
-        0.9,
-        1.0
-    ])
-
-    # ---- PIECEWISE LINEAR NORMALIZATION ----
-    perslice_df["Normalized_C1_CE_LE_SCtip"] = np.interp(
-        perslice_df["DistancePMJ"],
-        landmarks_dist,
-        landmarks_norm
-    )
-
-    # Save updated CSV
-    perslice_df.to_csv(per_slice_csv, index=False)
-
-    print(f"Final normalizedmorphometrics saved to:\n{per_slice_csv}")
-
 def PMJ_CE_LE_SCtip_normalization(per_slice_csv, PMJ_distances_csv):
 
     """
@@ -497,29 +379,28 @@ def main(subject, data_path, path_output, subject_dir, file_t2):
     interp_PMJ_dist_csv = os.path.join(output_csv_dir, f"{subject}_PMJ_dist_interp.csv")
     final_csv = os.path.join(output_csv_dir, f"{subject}_interpolated_morphometrics.csv")
 
-    # Check if final interpolated morphometrics CSV file already exists 
-    if os.path.exists(final_csv):
+
+    # Step 1 : Run sct_process_segmentation per slice to get the PMJ distances of each slice
+    run_sct_process_segmentation_per_slice(
+        pmj=t2w_pmj_label,
+        t2w_seg_file=t2w_seg_file,
+        output_per_slice_csv=output_per_slice_csv
+        )
+    
+    # Step 2 : Get the disc label slices and add the PMJ distances of each disc label
+
+    get_disc_label_PMJ_dist(
+        subject, 
+        output_per_slice_csv,
+        output_csv_dir, 
+        t2w_disc_labels,
+        output_PMJ_dist_csv=output_PMJ_dist_csv)
+        
+    # Step 3 : Interpolate the PMJ distances and run sct_process_segmentation for all interpolated PMJ distances
+    if os.path.exists(final_csv):  # Check if final interpolated morphometrics CSV file already exists 
         print(f"Interpolated morphometrics already exists for subject {subject}: {final_csv}. Skipping.")
     else:
         print(f"Computing interpolated morphometrics subject: {subject}")
-
-        # Step 1 : Run sct_process_segmentation per slice to get the PMJ distances of each slice
-        run_sct_process_segmentation_per_slice(
-            pmj=t2w_pmj_label,
-            t2w_seg_file=t2w_seg_file,
-            output_per_slice_csv=output_per_slice_csv
-            )
-
-
-        # Step 2 : Get the disc label slices and add the PMJ distances of each disc label
-        get_disc_label_PMJ_dist(
-            subject, 
-            output_per_slice_csv,
-            output_csv_dir, 
-            t2w_disc_labels,
-            output_PMJ_dist_csv=output_PMJ_dist_csv)
-        
-        # Step 3 : Interpolate the PMJ distances and run sct_process_segmentation for all interpolated PMJ distances
         compute_interpolated_morphometrics(
             subject,
             output_csv_dir, 
@@ -530,22 +411,13 @@ def main(subject, data_path, path_output, subject_dir, file_t2):
             interp_PMJ_dist_csv=interp_PMJ_dist_csv,
             final_csv_filename=final_csv
             )
-        
-    print(f"Normalizing SC with PMJ and SC tip for: {subject}")
     
-    # Step 4 : Normalize the distances using spinal cord landmarks (PMJ, C1, cervical and lumbar enlargments, tip of SC)
-
-    # Normalize with PMJ and SC tip only
-    PMJ_SCtip_normalization(output_per_slice_csv)
-
-    # Normalize the distances between C1 and SC tip
-    C1_SCtip_normalization(output_per_slice_csv, output_PMJ_dist_csv)
-
-    # Normalize the distances between C1, cervical enlargment, lumbar enlargment and SC tip
-    C1_CE_LE_SCtip_normalization(output_per_slice_csv, output_PMJ_dist_csv)
-
-    # Normalize the distances between PMJ, cervical enlargment, lumbar enlargment and SC tip
-    PMJ_CE_LE_SCtip_normalization(output_per_slice_csv, output_PMJ_dist_csv)
+    # Step 4 : Normalize the distances using spinal cord landmarks (PMJ, cervical and lumbar enlargments, tip of SC)
+    print(f"Normalizing SC with PMJ and SC tip for: {subject}")
+    PMJ_SCtip_normalization(output_per_slice_csv) # Normalize with PMJ and SC tip only
+    
+    print(f"Normalizing SC with PMJ, cervical enlargment, lumbar enlargment and SC tip for: {subject}")
+    PMJ_CE_LE_SCtip_normalization(output_per_slice_csv, output_PMJ_dist_csv) # Normalize the distances between PMJ, cervical enlargment, lumbar enlargment and SC tip
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run morphometric extraction for one subject")
