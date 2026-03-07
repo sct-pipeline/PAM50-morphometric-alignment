@@ -273,9 +273,8 @@ def PMJ_SCtip_normalization(per_slice_csv):
     perslice_df["Normalized_PMJ_SCtip"] = perslice_df["DistancePMJ"] / dist_PMJ_SC_tip
 
     # Add the "NormalizedDistance" column to the per_slice_csv
-    if "Normalized_PMJ_SCtip" not in perslice_df.columns:
-        perslice_df.to_csv(per_slice_csv, index=False)
-        print(f"Normalized morphometrics results saved to:\n{per_slice_csv}")
+    perslice_df.to_csv(per_slice_csv, index=False)
+    print(f"Normalized morphometrics results saved to:\n{per_slice_csv}")
 
 def PMJ_CE_LE_SCtip_normalization(per_slice_csv, PMJ_distances_csv):
 
