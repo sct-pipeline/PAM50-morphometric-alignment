@@ -371,21 +371,20 @@ def main(subject, data_path, path_output, subject_dir, file_t2):
     # Define max vert level
     max_level = 21.0
 
-    # # Step 1 : Run sct_process_segmentation per slice to get the PMJ distances of each slice
-    # run_sct_process_segmentation_per_slice(
-    #     pmj=t2w_pmj_label,
-    #     t2w_seg_file=t2w_seg_file,
-    #     output_per_slice_csv=output_per_slice_csv
-    #     )
+    # Step 1 : Run sct_process_segmentation per slice to get the PMJ distances of each slice
+    run_sct_process_segmentation_per_slice(
+        pmj=t2w_pmj_label,
+        t2w_seg_file=t2w_seg_file,
+        output_per_slice_csv=output_per_slice_csv
+        )
     
-    # # Step 2 : Get the disc label slices and add the PMJ distances of each disc label
-
-    # get_disc_label_PMJ_dist(
-    #     subject, 
-    #     output_per_slice_csv,
-    #     output_csv_dir, 
-    #     t2w_disc_labels,
-    #     output_PMJ_dist_csv=output_PMJ_dist_csv)
+    # Step 2 : Get the disc label slices and add the PMJ distances of each disc label
+    get_disc_label_PMJ_dist(
+        subject, 
+        output_per_slice_csv,
+        output_csv_dir, 
+        t2w_disc_labels,
+        output_PMJ_dist_csv=output_PMJ_dist_csv)
         
     # Step 2: Compute missing levels
     final_csv = os.path.join(output_csv_dir, f"{subject}_interpolated_morphometrics.csv")
@@ -401,18 +400,18 @@ def main(subject, data_path, path_output, subject_dir, file_t2):
     )
     
     # Step 3 : Interpolate the PMJ distances and run sct_process_segmentation for all interpolated PMJ distances (up to 21.0)
-    # print(f"Computing interpolated morphometrics incrementally up to level {max_level} for subject {subject}")
-    # compute_interpolated_morphometrics(
-    #     subject=subject,
-    #     output_csv_path=output_csv_dir,
-    #     PMJ_distances_csv=output_PMJ_dist_csv,
-    #     pmj=t2w_pmj_label,
-    #     t2w_seg_file=t2w_seg_file,
-    #     participants_info=participants_info,
-    #     interp_PMJ_dist_csv=interp_PMJ_dist_csv,
-    #     final_csv_filename=final_csv,
-    #     max_level=max_level
-    # )
+    print(f"Computing interpolated morphometrics incrementally up to level {max_level} for subject {subject}")
+    compute_interpolated_morphometrics(
+        subject=subject,
+        output_csv_path=output_csv_dir,
+        PMJ_distances_csv=output_PMJ_dist_csv,
+        pmj=t2w_pmj_label,
+        t2w_seg_file=t2w_seg_file,
+        participants_info=participants_info,
+        interp_PMJ_dist_csv=interp_PMJ_dist_csv,
+        final_csv_filename=final_csv,
+        max_level=max_level
+    )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run morphometric extraction for one subject")
